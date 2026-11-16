@@ -1057,7 +1057,7 @@ async def resolve_dispatch_provider(
     """
     if ctx.resolved_provider is not None:
         return await _prepare_for_dispatch(
-            ctx, ctx.resolved_provider, adapter=adapter, port=model_provider, billing=billing
+            ctx, ctx.resolved_provider, model_selector, adapter=adapter, port=model_provider, billing=billing
         )
     try:
         resolved = resolve_provider_selector(
@@ -1082,12 +1082,15 @@ async def resolve_dispatch_provider(
             safety_identifier=ctx.upstream_user,
         )
         _raise_for_unresolvable_model(model_selector, exc)
-    return await _prepare_for_dispatch(ctx, resolved, adapter=adapter, port=model_provider, billing=billing)
+    return await _prepare_for_dispatch(
+        ctx, resolved, model_selector, adapter=adapter, port=model_provider, billing=billing
+    )
 
 
 async def _prepare_for_dispatch(
     ctx: RequestContext,
     resolved: ResolvedProvider,
+    model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
     port: ModelProviderPort,
@@ -1101,7 +1104,7 @@ async def _prepare_for_dispatch(
         # and follows no redirect; see ``services/providers``.
         client_args = {"http_client": owned_endpoint_sdk_client(resolved.provider)}
         return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
-    served = await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
+    served = await _serve_from_hosted_credential(ctx, resolved, model_selector, adapter=adapter, port=port)
     ctx.deployment_paid = served.deployment_paid
     if served.deployment_paid:
         await _hold_at_deployment_paid_rate(ctx, served, adapter=adapter)
@@ -1161,7 +1164,7 @@ async def _refuse_if_hosted_model_switched_off(
 
 
 async def _refuse_if_model_unknown(
-    ctx: RequestContext, resolved: ResolvedProvider, *, adapter: FormatAdapter[Any, Any]
+    ctx: RequestContext, resolved: ResolvedProvider, model_selector: str, *, adapter: FormatAdapter[Any, Any]
 ) -> None:
     """Refuse a model of a vendor in the caller's catalog that neither the catalog nor models.dev knows.
 
@@ -1190,7 +1193,7 @@ async def _refuse_if_model_unknown(
         return
     spelled = f"{resolved.instance}/{resolved.model}".lower()
     nearest = difflib.get_close_matches(spelled, [model.id for model in models], n=2)
-    detail = unknown_model_detail(f"{resolved.instance}:{resolved.model}", nearest)
+    detail = unknown_model_detail(model_selector, nearest)
     await release_reservation(ctx)
     await log_gateway_rejection(
         db=ctx.db,
@@ -1586,6 +1589,7 @@ def _hosted_candidate(
 async def _serve_from_hosted_credential(
     ctx: RequestContext,
     resolved: ResolvedProvider,
+    model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
     port: ModelProviderPort,
@@ -1717,7 +1721,7 @@ async def _serve_from_hosted_credential(
 
     if credential is None and not lookup.own_name_only:
         await _refuse_if_hosted_model_switched_off(ctx, resolved, adapter=adapter, port=port)
-        await _refuse_if_model_unknown(ctx, resolved, adapter=adapter)
+        await _refuse_if_model_unknown(ctx, resolved, model_selector, adapter=adapter)
     if credential is None or not lookup.accepts(credential.response_provider, resolved.instance):
         raise await _provider_not_configured(ctx, resolved, missing, adapter=adapter)
     try:
