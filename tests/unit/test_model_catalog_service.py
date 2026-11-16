@@ -285,7 +285,10 @@ def test_the_fallback_is_the_bundled_catalog() -> None:
     assert catalog.model_for("openai", "gpt-4o") is not None
 
 
-def test_the_bundled_fallback_is_read_ahead_only_when_nothing_else_serves() -> None:
+def test_the_bundled_fallback_is_read_ahead_only_when_nothing_else_serves(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shared conftest turns the fallback off; this test is about reading it.
+    monkeypatch.setattr(mcs, "_fallback", _REAL_FALLBACK)
+    monkeypatch.setattr(mcs, "_bundled", None)
     mcs.load_bundled_fallback()
     assert mcs._bundled is not None
 
